@@ -1,3 +1,4 @@
+import { calculateCompensation2026, defaultCompensation2026, type Compensation2026Input } from "./compensation2026";
 import { useMemo, useState } from "react";
 import {
   calculateNewPlan,
@@ -10,7 +11,7 @@ import {
   PayPlanResult,
 } from "./payPlans";
 
-type PlanKey = "old" | "new";
+type PlanKey = "old" | "new" | "2026";
 
 type ResultTile = {
   title: string;
@@ -91,6 +92,7 @@ function MoneyField({
 function PlanToggle({ activePlan, setActivePlan }: { activePlan: PlanKey; setActivePlan: (plan: PlanKey) => void }) {
   return (
     <div className="plan-toggle" role="tablist" aria-label="Pay plan selector">
+      <button className={activePlan === "2026" ? "active" : ""} onClick={() => setActivePlan("2026")}>2026 Plan</button>
       <button className={activePlan === "old" ? "active" : ""} onClick={() => setActivePlan("old")}>Old Plan</button>
       <button className={activePlan === "new" ? "active" : ""} onClick={() => setActivePlan("new")}>New Plan <span>NEW</span></button>
     </div>
@@ -198,7 +200,8 @@ function ResultGrid({ tiles }: { tiles: ResultTile[] }) {
 }
 
 export default function App() {
-  const [activePlan, setActivePlan] = useState<PlanKey>("new");
+  const [activePlan, setActivePlan] = useState<PlanKey>("2026");
+  const [comp2026, setComp2026] = useState<Compensation2026Input>(defaultCompensation2026);
   const [newInput, setNewInput] = useState<NewPlanInput>(defaultNewInput);
   const [oldInput, setOldInput] = useState<OldPlanInput>(defaultOldInput);
 
@@ -238,13 +241,13 @@ export default function App() {
           <div>
             <p>Service Advisor</p>
             <h1>Pay Calculator</h1>
-            <small>Estimate your earnings under the {activePlan === "new" ? "New" : "Old"} Plan</small>
+            <small>Estimate your earnings under the {activePlan === "2026" ? "September 2026" : activePlan === "new" ? "New" : "Old"} Plan</small>
           </div>
         </div>
         <PlanToggle activePlan={activePlan} setActivePlan={setActivePlan} />
       </header>
 
-      <section className="layout">
+      {activePlan === "2026" ? <Compensation2026View input={comp2026} setInput={setComp2026} /> : <><section className="layout">
         <aside className="left-stack">
           <section className="panel input-panel">
             <h2><span className="user-icon">○</span> Your Inputs</h2>
@@ -299,7 +302,55 @@ export default function App() {
             <span>Sublet 0.5%</span>
           </>
         )}
-      </section>
+      </section></>}
     </main>
   );
+}
+
+function Compensation2026View({ input, setInput }: { input: Compensation2026Input; setInput: React.Dispatch<React.SetStateAction<Compensation2026Input>> }) {
+  const result = calculateCompensation2026(input);
+  const numeric: {key: keyof Compensation2026Input; label: string; unit?: string}[] = [
+    {key:"tenureYears",label:"Years of service"},
+    {key:"cpLaborGross",label:"Customer-pay labor gross",unit:"$"},
+    {key:"warrantyLaborGross",label:"Warranty labor gross",unit:"$"},
+    {key:"alignments",label:"Alignments sold"},
+    {key:"tireSales",label:"Tire sales dollars",unit:"$"},
+    {key:"bServices",label:"B services sold"},
+    {key:"tireBalances",label:"Tire balances sold"},
+    {key:"brakeFluid",label:"Brake-fluid services sold"},
+    {key:"twoServices",label:"2 services sold"},
+    {key:"wipers",label:"Wipers / inserts sold"},
+    {key:"drawAlreadyPaid",label:"Draw already paid this month",unit:"$"},
+  ];
+  const surveys: {key:"surveyService"|"surveyTreatment"|"surveyValue";label:string}[] = [
+    {key:"surveyService",label:"Service advisor score qualifies (Honda national average 90%)"},
+    {key:"surveyTreatment",label:"Treatment / MPI score qualifies (Honda national average 92%)"},
+    {key:"surveyValue",label:"Charges and value score qualifies (Honda national average 92%)"},
+  ];
+  return <div className="comp-layout">
+    <section className="panel comp-inputs">
+      <h2>September 2026 · Monthly inputs</h2>
+      <p>Enter individually written labor gross, not parts-and-labor sales. Blank figures count as zero.</p>
+      <div className="comp-fields">{numeric.map(({key,label,unit})=><label key={key} className="comp-field"><span>{label}</span><div>{unit && <span>{unit}</span>}<input type="number" min="0" step={key === "tenureYears" ? "0.1" : key.includes("Gross") || key === "tireSales" || key === "drawAlreadyPaid" ? "0.01" : "1"} value={input[key] as number} onChange={e=>setInput(current=>({...current,[key]: Math.max(0,Number(e.target.value)||0)}))}/></div></label>)}</div>
+      <h3>Honda survey qualifications</h3>
+      {surveys.map(({key,label})=><label className="comp-check" key={key}><input type="checkbox" checked={input[key]} onChange={e=>setInput(current=>({...current,[key]:e.target.checked}))}/><span>{label}</span></label>)}
+    </section>
+    <section className="comp-results">
+      <div className="comp-hero panel"><span>Estimated monthly gross earned</span><strong>{formatCurrency(result.earned)}</strong><small>Before withholding, prorating and payroll adjustments</small></div>
+      <div className="comp-summary">
+        <div className="panel"><span>Labor commission</span><strong>{formatCurrency(result.cp+result.warranty)}</strong><small>{formatPercent(result.rate)} tenure rate</small></div>
+        <div className="panel"><span>Production bonuses</span><strong>{formatCurrency(result.production)}</strong><small>Seven bonus categories</small></div>
+        <div className="panel"><span>Honda survey bonus</span><strong>{formatCurrency(result.survey)}</strong><small>Includes $250 all-three bonus when earned</small></div>
+        <div className="panel"><span>Earned less draw paid</span><strong>{formatCurrency(result.remainingAfterDraw)}</strong><small>Not a guaranteed paycheck amount</small></div>
+      </div>
+      <section className="panel comp-breakdown"><h2>Detailed earnings breakdown</h2>
+        <div><span>Customer-pay labor commission</span><b>{formatCurrency(result.cp)}</b></div>
+        <div><span>Warranty labor commission</span><b>{formatCurrency(result.warranty)}</b></div>
+        {result.bonuses.map(b=><div key={b.label}><span>{b.label}</span><b>{formatCurrency(b.amount)}</b></div>)}
+        <div><span>Honda survey bonuses</span><b>{formatCurrency(result.survey)}</b></div>
+        <div className="comp-total"><span>Total earned</span><b>{formatCurrency(result.earned)}</b></div>
+      </section>
+      <p className="comp-disclaimer">{result.warnings.join(" ")}</p>
+    </section>
+  </div>;
 }
